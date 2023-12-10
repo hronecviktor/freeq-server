@@ -75,36 +75,23 @@ async def get_event(
     queue: Queue,
     key: Key,
     ack: bool = True,
-    block: bool = False,
 ):
     redis_key = f"{queue}-{key}"
 
-    if block:
-        data = await r.bzpopmin(redis_key, timeout=FREEQ_REDIS_BLOCKING_TIMEOUT)
-        if data is not None:
-            _, payload, tstamp = data
-        else:
-            # Timeout - queue is empty, poll again
-            response.status_code = status.HTTP_204_NO_CONTENT
-            return
-        if not ack:
-            # Redis has no blocking zrangebyscore, so we need to re-add the event
-            await r.zadd(redis_key, {payload: tstamp})
+    if ack:
+        try:
+            payload, tstamp = (await r.zpopmin(redis_key))[0]
+        except (IndexError, ValueError):
+            payload = None
     else:
-        if ack:
-            try:
-                payload, tstamp = (await r.zpopmin(redis_key))[0]
-            except (IndexError, ValueError):
-                payload = None
-        else:
-            try:
-                payload, tstamp = (await r.zrange(redis_key, 0, 0, withscores=True))[0]
-            except (IndexError, ValueError):
-                payload = None
-        if not payload:
-            # Queue is empty
-            response.status_code = status.HTTP_204_NO_CONTENT
-            return
+        try:
+            payload, tstamp = (await r.zrange(redis_key, 0, 0, withscores=True))[0]
+        except (IndexError, ValueError):
+            payload = None
+    if not payload:
+        # Queue is empty
+        response.status_code = status.HTTP_204_NO_CONTENT
+        return
 
     payload = payload.decode("utf-8").split("-", 1)[1]
     return Message(
