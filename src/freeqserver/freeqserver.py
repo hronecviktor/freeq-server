@@ -1,5 +1,6 @@
 import os
 import time
+from urllib.parse import urlparse
 
 from fastapi import FastAPI, Path, Query, Response, status
 from pydantic import BaseModel
@@ -7,15 +8,27 @@ from redis.asyncio import Redis as AsyncRedis
 from typing_extensions import Annotated
 
 
-REDIS_BLOCKING_TIMEOUT = int(os.getenv("REDIS_BLOCKING_TIMEOUT", 60))
-REDIS_EXPIRY = int(os.getenv("REDIS_EXPIRY", 60 * 60 * 24 * 2))
-REDIS_MAX_QLEN = int(os.getenv("REDIS_MAX_QLEN", 2048))
-REDIS_PWD = os.getenv("REDIS_PWD", None)
+FREEQ_REDIS_BLOCKING_TIMEOUT = int(os.getenv("FREEQ_REDIS_BLOCKING_TIMEOUT", 60))
+FREEQ_REDIS_EXPIRY = int(os.getenv("FREEQ_REDIS_EXPIRY", 60 * 60 * 24 * 2))
+FREEQ_REDIS_MAX_QLEN = int(os.getenv("FREEQ_REDIS_MAX_QLEN", 2048))
+FREEQ_REDIS_URL = os.getenv("FREEQ_REDIS_URL", "redis://localhost:6379/0")
+
+redis_url = urlparse(FREEQ_REDIS_URL)
+if redis_url.username and not redis_url.password:
+    user = None
+    pwd = redis_url.username
+else:
+    user = redis_url.username
+    pwd = redis_url.password
 
 
 app = FastAPI()
 r = AsyncRedis(
-    password=REDIS_PWD,
+    host=redis_url.hostname,
+    port=redis_url.port,
+    db=int(redis_url.path[1:]),
+    password=pwd,
+    username=user,
 )
 
 
@@ -43,12 +56,9 @@ Queue = Annotated[str, Path(title="Queue name", min_length=8, max_length=256)]
 Key = Annotated[str, Path(title="Queue access key", min_length=16, max_length=256)]
 
 
-@app.get("/")
+@app.get("/", status_code=status.HTTP_200_OK)
 async def hi():
-    return (
-        "Priority one — Ensure return of organism for analysis. All other considerations secondary. Crew expendable.",
-        200,
-    )
+    return "Priority one — Ensure return of organism for analysis. All other considerations secondary. Crew expendable."
 
 
 @app.get(
@@ -70,7 +80,7 @@ async def get_event(
     redis_key = f"{queue}-{key}"
 
     if block:
-        data = await r.bzpopmin(redis_key, timeout=REDIS_BLOCKING_TIMEOUT)
+        data = await r.bzpopmin(redis_key, timeout=FREEQ_REDIS_BLOCKING_TIMEOUT)
         if data is not None:
             _, payload, tstamp = data
         else:
@@ -183,7 +193,7 @@ async def post_event(
     event: Event,
 ):
     redis_key = f"{queue}-{key}"
-    if await r.zcard(redis_key) > REDIS_MAX_QLEN:
+    if await r.zcard(redis_key) > FREEQ_REDIS_MAX_QLEN:
         response.status_code = status.HTTP_409_CONFLICT
         return Message(
             success=False,
@@ -194,7 +204,7 @@ async def post_event(
     payload = f"{tstamp}-{event.data}"
 
     await r.zadd(redis_key, {payload: tstamp})
-    await r.expire(redis_key, REDIS_EXPIRY)
+    await r.expire(redis_key, FREEQ_REDIS_EXPIRY)
     return Message(
         success=True,
         message=f"Added event {tstamp} to queue '{queue}'",

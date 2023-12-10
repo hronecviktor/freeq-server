@@ -24,6 +24,8 @@ email-validator==2.1.0.post1
     # via fastapi
 fastapi[all]==0.104.1
     # via -r requirements.in
+gunicorn==21.2.0
+    # via -r requirements.in
 h11==0.14.0
     # via
     #   httpcore
@@ -49,8 +51,11 @@ markupsafe==2.1.3
     # via jinja2
 orjson==3.9.10
     # via fastapi
+packaging==23.2
+    # via gunicorn
 pydantic==2.5.2
     # via
+    #   -r requirements.in
     #   fastapi
     #   pydantic-extra-types
     #   pydantic-settings
@@ -78,7 +83,7 @@ sniffio==1.3.0
     #   httpx
 starlette==0.27.0
     # via fastapi
-typing-extensions==4.8.0
+typing-extensions==4.9.0
     # via
     #   fastapi
     #   pydantic
